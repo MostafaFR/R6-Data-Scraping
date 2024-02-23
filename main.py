@@ -8,8 +8,9 @@ import shutil
 
 s = HTMLSession()
 url_root = "https://liquipedia.net/"
+url_rainbow6 = "https://liquipedia.net/rainbowsix"
 url_teams = "https://liquipedia.net/rainbowsix/Portal:Teams"
-url_tournament = "https://liquipedia.net/rainbowsix/Portal:Tournaments"
+url_tournaments = "https://liquipedia.net/rainbowsix/Portal:Tournaments"
 list_tournaments = ["S-Tier_Tournaments", "A-Tier_Tournaments", "B-Tier_Tournaments", "C-Tier_Tournaments"]
 excel_file = "out/LiquipediaScraping.xlsx"
 media_folder = "media/"
@@ -36,6 +37,11 @@ try:
         print("Fichier Excel chargé avec succès.")
         if "Players" in workbook.sheetnames:
             workbook.remove(workbook["Players"])
+            worksheet_players = workbook.create_sheet(title="Players")
+            worksheet_players.append(
+                ["Flag", "Player Name", "Player Surname", "Role", "Team"]
+            )
+        else:
             worksheet_players = workbook.create_sheet(title="Players")
             worksheet_players.append(
                 ["Flag", "Player Name", "Player Surname", "Role", "Team"]
@@ -127,6 +133,18 @@ def get_teams():
                     f"Joueur {player_name} {player_surname} ajouté pour l'équipe {team_name}"
                 )
     workbook.save(excel_file)
+    
+def getMatchs():
+    if len(list_tournaments) == 0 or list_tournaments == None:
+        print("Aucun tournoi n'a été trouvé.")
+        return
+    for tournament in list_tournaments:
+        url_tournament = url_rainbow6 + "/" + tournament
+        r = s.get(url_tournament)
+        match_html_list = r.html.find("div.mw-parser-output div.gridTable.tournamentCard")
+        
+        print(len(match_html_list))
 
 
-main()
+# main()
+getMatchs()
