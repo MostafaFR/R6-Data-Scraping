@@ -1,2 +1,4 @@
-/media
-/out
+out
+.vscode
+media
+pyproject.toml
