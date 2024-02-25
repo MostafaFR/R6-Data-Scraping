@@ -96,13 +96,14 @@ class JSONManager:
         self.tournament_expression = "[*].{name : name, url : url, date:date, prize_pool:prize_pool,location:location,number_of_participants:number_of_participants,winner:winner,runner_up:runner_up}"
 
     def save(self, data):
-        with open(self.file_path, "w") as f:
-            f.write(json.dumps(data, indent=4))
-            f.close()
+        tournaments_data = self.save_tournaments_in_excel(data, self.excel_manager.tournaments_sheet)
+        matches_data = self.save_matches_in_excel(data, self.excel_manager.matches_sheet)
+
+        tournaments_data.to_json(self.file_path, orient="records")
+        matches_data.to_json(self.file_path, orient="records")
         print("Fichier JSON enregistré avec succès.")
 
-        self.save_tournaments_in_excel(data, self.excel_manager.tournaments_sheet)
-        self.save_matches_in_excel(data, self.excel_manager.matches_sheet)
+        
 
     def save_tournaments_in_excel(self, data, sheet):
         # Ajout des tournaments
@@ -115,6 +116,7 @@ class JSONManager:
         sheet.append(tournaments_data.columns.tolist())
         for row in tournaments_data.iterrows():
             sheet.append(row[1].tolist())
+        return tournaments_data
 
     def save_matches_in_excel(self, data, sheet):
         # Ajout des matches
@@ -129,7 +131,7 @@ class JSONManager:
         sheet.append(matches_data.columns.tolist())
         for row in matches_data.iterrows():
             sheet.append(row[1].tolist())
-
+        return matches_data
 
     @staticmethod
     def flatten_json(json_input, parent_key="", sep="-"):
