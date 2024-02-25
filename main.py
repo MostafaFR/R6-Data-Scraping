@@ -73,15 +73,15 @@ class ExcelManager:
             self.workbook.remove(self.workbook["Sheet"])
         if "Players" in self.workbook.sheetnames:
             self.workbook.remove(self.workbook["Players"])
-            self.players_sheet = self.workbook.create_sheet(title="Players")
-            self.players_sheet.append(["Flag", "Player Name", "Player Surname", "Role", "Team"])
-
         if "Tournaments" in self.workbook.sheetnames:
             self.workbook.remove(self.workbook["Tournaments"])
-            self.tournaments_sheet = self.workbook.create_sheet(title="Tournaments")
         if "Matches" in self.workbook.sheetnames:
             self.workbook.remove(self.workbook["Matches"])
-            self.matches_sheet = self.workbook.create_sheet(title="Matches")
+
+        self.players_sheet = self.workbook.create_sheet(title="Players")
+        self.players_sheet.append(["Flag", "Player Name", "Player Surname", "Role", "Team"])
+        self.tournaments_sheet = self.workbook.create_sheet(title="Tournaments")
+        self.matches_sheet = self.workbook.create_sheet(title="Matches")
 
     def save(self):
         self.workbook.save(self.file_path)
@@ -101,16 +101,24 @@ class JSONManager:
             f.close()
         print("Fichier JSON enregistré avec succès.")
 
-        self.save_json_in_excel(data, self.excel_manager.tournaments_sheet)
+        self.save_tournaments_in_excel(data, self.excel_manager.tournaments_sheet)
+        self.save_matches_in_excel(data, self.excel_manager.matches_sheet)
 
-    def save_json_in_excel(self, data, sheet):
+    def save_tournaments_in_excel(self, data, sheet):
         # Ajout des tournaments
         tournaments = jmespath.search(self.tournament_expression, data)
         tournaments_data = pd.DataFrame(tournaments)
         sheet.append(tournaments_data.columns.tolist())
         for row in tournaments_data.iterrows():
             sheet.append(row[1].tolist())
-            
+
+    def save_matches_in_excel(self, data, sheet):
+        # Ajout des matches
+        matches = jmespath.search(self.match_expression, data)
+        matches_data = pd.DataFrame(matches)
+        sheet.append(matches_data.columns.tolist())
+        for row in matches_data.iterrows():
+            sheet.append(row[1].tolist())
 
 
     @staticmethod
