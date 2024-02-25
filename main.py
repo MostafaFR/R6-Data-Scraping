@@ -17,15 +17,15 @@ class LiquipediaScraper:
         parameters = {
             "Tiers": [
                 "S-Tier_Tournaments",
-                # "A-Tier_Tournaments",
+                "A-Tier_Tournaments",
                 # "B-Tier_Tournaments",
                 # "C-Tier_Tournaments",
             ],
             "Years": [
-                # "2024",
+                "2024",
                 "2023",
-                #   "2022",
-                #   "2021"
+                "2022",
+                "2021"
             ],
         }
         self.output_folder = "out/"
@@ -43,7 +43,7 @@ class LiquipediaScraper:
 
     def run(self):
         # Lance le processus de scraping pour les équipes et les tournois, puis sauvegarde les résultats dans un fichier Excel
-        # self.team_scraper.scrape_teams()
+        self.team_scraper.scrape_teams()
         self.tournament_scraper.scrape_tournaments()
         self.excel_manager.save()
 
