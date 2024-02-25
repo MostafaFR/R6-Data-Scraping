@@ -3,6 +3,8 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.drawing.image import Image
 from openpyxl.utils.exceptions import InvalidFileException
+import pandas as pd
+import jmespath
 import os
 import json
 import re
@@ -15,13 +17,13 @@ class LiquipediaScraper:
         parameters = {
             "Tiers": [
                 "S-Tier_Tournaments",
-                "A-Tier_Tournaments",
-                "B-Tier_Tournaments",
+                # "A-Tier_Tournaments",
+                # "B-Tier_Tournaments",
                 # "C-Tier_Tournaments",
             ],
             "Years": [
-                "2024",
-                #   "2023",
+                # "2024",
+                "2023",
                 #   "2022",
                 #   "2021"
             ],
@@ -32,14 +34,16 @@ class LiquipediaScraper:
         self.base_url = base_url
         self.session = HTMLSession()
         self.excel_manager = ExcelManager()
-        self.json_manager = JSONManager()
+        self.json_manager = JSONManager(self.excel_manager)
         self.image_downloader = ImageDownloader(self.session)
         self.team_scraper = TeamScraper(self.session, self.base_url, self.image_downloader, self.excel_manager, self.json_manager)
-        self.tournament_scraper = TournamentScraper(self.session, self.base_url, self.json_manager, parameters["Tiers"], parameters["Years"])
+        self.tournament_scraper = TournamentScraper(
+            self.session, self.base_url, self.excel_manager, self.json_manager, parameters["Tiers"], parameters["Years"]
+        )
 
     def run(self):
         # Lance le processus de scraping pour les équipes et les tournois, puis sauvegarde les résultats dans un fichier Excel
-        self.team_scraper.scrape_teams()
+        # self.team_scraper.scrape_teams()
         self.tournament_scraper.scrape_tournaments()
         self.excel_manager.save()
 
@@ -65,12 +69,19 @@ class ExcelManager:
         self.prepare_sheet()
 
     def prepare_sheet(self):
+        if self.workbook.active.title == "Sheet":
+            self.workbook.remove(self.workbook["Sheet"])
         if "Players" in self.workbook.sheetnames:
             self.workbook.remove(self.workbook["Players"])
-        elif self.workbook.active.title == "Sheet":
-            self.workbook.remove(self.workbook["Sheet"])
-        self.players_sheet = self.workbook.create_sheet(title="Players")
-        self.players_sheet.append(["Flag", "Player Name", "Player Surname", "Role", "Team"])
+            self.players_sheet = self.workbook.create_sheet(title="Players")
+            self.players_sheet.append(["Flag", "Player Name", "Player Surname", "Role", "Team"])
+
+        if "Tournaments" in self.workbook.sheetnames:
+            self.workbook.remove(self.workbook["Tournaments"])
+            self.tournaments_sheet = self.workbook.create_sheet(title="Tournaments")
+        if "Matches" in self.workbook.sheetnames:
+            self.workbook.remove(self.workbook["Matches"])
+            self.matches_sheet = self.workbook.create_sheet(title="Matches")
 
     def save(self):
         self.workbook.save(self.file_path)
@@ -78,32 +89,29 @@ class ExcelManager:
 
 
 class JSONManager:
-    def __init__(self, file_path="out/tournament.json"):
+    def __init__(self, excelmanager, file_path="out/tournament.json"):
         self.file_path = file_path
-        self.data = None
-        self.load_or_create_json()
+        self.excel_manager = excelmanager
+        self.match_expression = "[*].matches[]"
+        self.tournament_expression = "[*].{name : name, url : url, date:date, prize_pool:prize_pool,location:location,number_of_participants:number_of_participants,winner:winner,runner_up:runner_up}"
 
-    def load_or_create_json(self):
-        if not os.path.exists(self.file_path):
-            self.data = {}
-            print("Fichier JSON créé avec succès.")
-        else:
-            with open(self.file_path, "r") as f:
-                self.data = json.load(f)
-                f.close()
-            print("Fichier JSON chargé avec succès.")
-
-    def write_json(self, data):
+    def save(self, data):
         with open(self.file_path, "w") as f:
             f.write(json.dumps(data, indent=4))
             f.close()
         print("Fichier JSON enregistré avec succès.")
 
-    def save(self):
-        with open(self.file_path, "w") as f:
-            f.write(json.dumps(self.data, indent=4))
-            f.close()
-        print("Fichier JSON enregistré avec succès.")
+        self.save_json_in_excel(data, self.excel_manager.tournaments_sheet)
+
+    def save_json_in_excel(self, data, sheet):
+        # Ajout des tournaments
+        tournaments = jmespath.search(self.tournament_expression, data)
+        tournaments_data = pd.DataFrame(tournaments)
+        sheet.append(tournaments_data.columns.tolist())
+        for row in tournaments_data.iterrows():
+            sheet.append(row[1].tolist())
+            
+
 
     @staticmethod
     def flatten_json(json_input, parent_key="", sep="-"):
@@ -124,12 +132,6 @@ class JSONManager:
                 # Même traitement pour les listes à la racine (bien que peu commun)
                 items.extend(JSONManager.flatten_json(item, parent_key, sep=sep).items())
         return dict(items)
-
-    def convert_json_to_excel(self, json_input, sheet):
-        json_input = JSONManager.flatten_json(json_input)
-        for key, value in json_input.items():
-            sheet.append([key, value])
-        return sheet
 
 
 class ImageDownloader:
@@ -211,6 +213,7 @@ class TournamentScraper:
         self,
         session,
         base_url,
+        excel_manager,
         json_manager,
         list_tiers=["S-Tier_Tournaments"],
         years=["2024"],
@@ -222,13 +225,14 @@ class TournamentScraper:
         self.years = years
         self.tournament_result = []
         self.json_manager = json_manager
+        self.excelmanager = excel_manager
 
     def scrape_tournaments(self):
         if len(self.list_tiers) == 0 or self.list_tiers == None:
             print("Aucun tournoi n'a été trouvé.")
             return
 
-        header_list_temp = [
+        html_tournament_headers = [
             "G & S",
             "Tournament",
             "Date",
@@ -243,10 +247,10 @@ class TournamentScraper:
             url_tier = self.r6_base_url + tiers
             r = self.session.get(url_tier)
 
-            header_list_temp = []
+            html_tournament_headers = []
             headers_html = r.html.find("div.mw-parser-output div.gridTable.tournamentCard", first=True).find("div.gridHeader div.gridCell")
             for header in headers_html:
-                header_list_temp.append(header.full_text)
+                html_tournament_headers.append(header.full_text)
 
             tournaments_html_list = r.html.find("div.mw-parser-output div.gridTable.tournamentCard div.gridRow")
             for tournament_html in tournaments_html_list:
@@ -277,8 +281,8 @@ class TournamentScraper:
                             print(f"Le tournoi {tournament['name']} a été ajouté.")
                         else:
                             print(f"Le tournoi {tournament['name']} est annulé ou en cours.")
-        self.json_manager.write_json(self.tournament_result)
-        # self.json_manager.convert_json_to_excel(self.tournament_result, self.json_manager.workbook.create_sheet(title="Tournaments"))
+
+        self.json_manager.save(self.tournament_result)
 
 
 class MatchScraper:
@@ -321,10 +325,16 @@ class MatchScraper:
                 self.data = self.session.get(self.api_url + self.tournament["url"].replace("/rainbowsix/", "") + section).json()
                 data_str = str(self.data["query"]["pages"]).replace("\\n", "").replace("\\t", "")
                 self.extract_json_matches(data_str)
+
+        # dans tous les objets ayant une clé date, replace
+        for match in self.match_result:
+            try:
+                match["date"] = match["date"].replace(",", "")
+            except:
+                pass
         return self.match_result
 
     def extract_json_matches(self, data_str):
-        print(data_str.count("{{Match|") + data_str.count("{{BracketMatchSummary|"))
         matches = []
         pos = 0
         while pos < len(data_str):
