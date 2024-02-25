@@ -17,15 +17,15 @@ class LiquipediaScraper:
         parameters = {
             "Tiers": [
                 "S-Tier_Tournaments",
-                "A-Tier_Tournaments",
+                # "A-Tier_Tournaments",
                 # "B-Tier_Tournaments",
                 # "C-Tier_Tournaments",
             ],
             "Years": [
                 "2024",
                 "2023",
-                "2022",
-                "2021"
+                # "2022",
+                # "2021"
             ],
         }
         self.output_folder = "out/"
@@ -108,6 +108,10 @@ class JSONManager:
         # Ajout des tournaments
         tournaments = jmespath.search(self.tournament_expression, data)
         tournaments_data = pd.DataFrame(tournaments)
+
+        if "url" in tournaments_data.columns:
+            tournaments_data["url"] = "https://liquipedia.net" + tournaments_data["url"]
+            
         sheet.append(tournaments_data.columns.tolist())
         for row in tournaments_data.iterrows():
             sheet.append(row[1].tolist())
@@ -116,6 +120,12 @@ class JSONManager:
         # Ajout des matches
         matches = jmespath.search(self.match_expression, data)
         matches_data = pd.DataFrame(matches)
+
+        if "siegegg" in matches_data.columns:
+            matches_data["siegegg"] = "https://siege.gg/matches/" + matches_data["siegegg"]
+        if "r6esports" in matches_data.columns:
+            matches_data["r6esports"] = "https://www.ubisoft.com/en-us/esports/rainbow-six/siege/match/" + matches_data["r6esports"]
+
         sheet.append(matches_data.columns.tolist())
         for row in matches_data.iterrows():
             sheet.append(row[1].tolist())
