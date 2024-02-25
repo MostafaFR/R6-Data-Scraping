@@ -1,11 +1,11 @@
-from turtle import title
 from requests_html import HTMLSession
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.drawing.image import Image
 from openpyxl.utils.exceptions import InvalidFileException
 import os
-import shutil
+import json
+import re
 
 
 class LiquipediaScraper:
@@ -18,7 +18,7 @@ class LiquipediaScraper:
         self.tournament_scraper = TournamentScraper(self.session, self.base_url)
 
     def run(self):
-        # self.team_scraper.scrape_teams()
+        self.team_scraper.scrape_teams()
         self.tournament_scraper.scrape_tournaments()
         self.excel_manager.save()
 
@@ -55,6 +55,46 @@ class ExcelManager:
         self.workbook.save(self.file_path)
         print("Fichier Excel enregistré avec succès.")
 
+class JSONManager:
+    def __init__(self, file_path="out/tournament.json"):
+        self.file_path = file_path
+        self.data = None
+        self.load_json()
+
+    def load_json(self):
+        if not os.path.exists(self.file_path):
+            print("Le fichier JSON n'existe pas.")
+            return
+        with open(self.file_path, "r") as f:
+            self.data = json.load(f)
+            f.close()
+        print("Fichier JSON chargé avec succès.")
+
+    def save(self):
+        with open(self.file_path, "w") as f:
+            f.write(json.dumps(self.data, indent=4))
+            f.close()
+        print("Fichier JSON enregistré avec succès.")
+
+    @staticmethod
+    def flatten_json(json_input, parent_key="", sep="-"):
+        items = []
+        if isinstance(json_input, dict):
+            for k, v in json_input.items():
+                new_key = f"{parent_key}{sep}{k}" if parent_key else k
+                if isinstance(v, dict):
+                    items.extend(JSONManager.flatten_json(v, new_key, sep=sep).items())
+                elif isinstance(v, list):
+                    for item in v:
+                        # Traitement des éléments de la liste sans ajouter d'indice
+                        items.extend(JSONManager.flatten_json(item, new_key, sep=sep).items())
+                else:
+                    items.append((new_key, v))
+        elif isinstance(json_input, list):
+            for item in json_input:
+                # Même traitement pour les listes à la racine (bien que peu commun)
+                items.extend(JSONManager.flatten_json(item, parent_key, sep=sep).items())
+        return dict(items)
 
 class ImageDownloader:
     def __init__(self, session, media_folder="media/"):
@@ -73,7 +113,6 @@ class ImageDownloader:
 
     def download_image(self, folder, image_url):
         r = self.session.get(image_url)
-        print(image_url)
         image_name = self.get_image_name_from_url(image_url)
         with open(self.media_folder + folder + image_name, "wb") as f:
             f.write(r.content)
@@ -127,7 +166,7 @@ class TeamScraper:
                         flag,
                         get_column_letter(1) + str(self.excel_manager.players_sheet.max_row),
                     )
-                    print(f"Joueur {player_name} {player_surname} ajouté pour l'équipe {team_name}")
+                print(f"Les joueurs de l'équipe {team_name} ont été extaits avec succès.")
 
 
 class TournamentScraper:
@@ -140,13 +179,15 @@ class TournamentScraper:
             "S-Tier_Tournaments",
             "A-Tier_Tournaments",
             "B-Tier_Tournaments",
-            "C-Tier_Tournaments",
+            # "C-Tier_Tournaments",
         ],
     ):
         self.session = session
         self.base_url = base_url
         self.r6_base_url = r6_base_url
         self.list_tiers = list_tiers
+        self.years = ["2023"]
+        self.tournament_result = []
 
     def scrape_tournaments(self):
         if len(self.list_tiers) == 0 or self.list_tiers == None:
@@ -190,19 +231,153 @@ class TournamentScraper:
                 except:
                     tournament["winner"] = ""
                     tournament["runner_up"] = ""
-                MatchScraper(self.session, self.base_url, tournament)
-            break
+
+                for year in self.years:
+                    if year in tournament["date"]:
+                        if tournament["winner"] != "":
+                            match_scraper = MatchScraper(self.session, self.base_url, tournament)
+                            result = match_scraper.extract_matches()
+                            # apprend avec le nom du tournoi seulement
+                            tournament["matches"] = result
+                            self.tournament_result.append(tournament)
+                            print(f"Le tournoi {tournament['name']} a été ajouté.")
+                        else:
+                            print(f"Le tournoi {tournament['name']} est annulé ou en cours.")
+        with open("tournament.json", "w") as f:
+            f.write(json.dumps(self.tournament_result, indent=4))
+            f.close()
 
 
 class MatchScraper:
-    def __init__(self, session, base_url, tournament):
+    def __init__(
+        self,
+        session,
+        base_url,
+        tournament,
+        api_url="https://liquipedia.net/rainbowsix/api.php?action=query&format=json&prop=revisions&rvprop=content&titles=",
+    ):
         self.session = session
         self.base_url = base_url
         self.tournament = tournament
+        self.api_url = api_url
+        self.data = self.session.get(self.api_url + self.tournament["url"].replace("/rainbowsix/", "")).json()
+        self.match_section = ""
+        self.pattern = r"\{\{#section:[^}]+\}\}"
+        self.pattern_result = ""
+        self.match_result = []
 
-    def scrape_match(self):
-        r = self.session.get(self.base_url + self.tournament["url"])
-        print(r.html.find("div.matchlist", first=True).full_text)
+    def extract_match_section(self, match_block):
+        print("MAtchSection")
+        match_block = match_block.replace("\\n", "").replace("\\t", "").replace("\\", "").replace("{{", "").replace("}}", "")
+        parts = match_block.split("|")
+        if len(parts) > 1:
+            self.match_section = parts[1]
+
+    def extract_matches(self):
+        data_str = str(self.data["query"]["pages"]).replace("\\n", "").replace("\\t", "")
+        if "Match|" in data_str or "BracketMatchSummary|" in data_str:
+            self.extract_json_matches(data_str)
+        else:
+            tournament = str(self.tournament["url"].replace("/rainbowsix/", ""))
+            self.pattern_result = re.findall(self.pattern, data_str)
+            for section in self.pattern_result:
+                section = section.split("section:")[-1].replace(tournament, "").split("|")[0]
+                self.data = self.session.get(self.api_url + self.tournament["url"].replace("/rainbowsix/", "") + section).json()
+                data_str = str(self.data["query"]["pages"]).replace("\\n", "").replace("\\t", "")
+                self.extract_json_matches(data_str)
+        return self.match_result
+
+    def extract_json_matches(self, data_str):
+        print(data_str.count("{{Match|") + data_str.count("{{BracketMatchSummary|"))
+        matches = []
+        pos = 0
+        while pos < len(data_str):
+            start = data_str.find("{{Match|", pos)
+            if start == -1:
+                start = data_str.find("{{BracketMatchSummary|", pos)
+                if start == -1:
+                    break
+
+            count = 0
+            for i in range(start, len(data_str)):
+                if data_str[i : i + 2] == "{{":
+                    count += 1
+                elif data_str[i : i + 2] == "}}":
+                    count -= 1
+                if count == 0:
+                    match_block = data_str[start : i + 2]
+                    if "MatchSection" in match_block:
+                        self.extract_match_section(match_block)
+                        pos = i + 2
+                        break
+                    matches.append(match_block)
+                    pos = i + 2
+                    break
+            else:
+                raise ValueError("Match block not properly closed.")
+
+        print(f"{len(matches)} matchs ont été trouvés.")
+        if len(matches) == 0:
+            print("\n\nAucun match n'a été trouvé.")
+            return
+
+
+        for match in matches:
+            jsonconvert = MatchToJsonConverter()
+            json_output = jsonconvert.extract_objects(match, self.match_section)
+            json_output = jsonconvert.flatten_json(json_output)
+            self.match_result.append(json_output)
+        return self.match_result
+
+
+
+class MatchToJsonConverter:
+    @staticmethod
+    def text_to_json(text, match_section=""):
+        obj = MatchToJsonConverter.parse_object(text)
+        if match_section:
+            obj["MatchSection"] = match_section
+        return obj
+
+    @staticmethod
+    def parse_object(s):
+        temp_key = ""
+        objects = {}
+        for i in range(len(s)):
+            if "=" not in s[i]:
+                try:
+                    objects[temp_key] += "|" + s[i]
+                except:
+                    continue
+                continue
+            key, value = s[i].split("=", 1)
+            if "[" in value and "|" in value:
+                value = value.replace("[", "").replace("]", "").split("|")
+                value = value[1:]
+                if len(value) == 2 and "opponent" in key:
+                    value = value[:1]
+                if len(value) > 1:
+                    value = [MatchToJsonConverter.parse_object(value)]
+                else:
+                    value = value[0]
+            objects[key] = value
+            temp_key = key
+        return objects
+
+    @staticmethod
+    def extract_objects(s, match_section=""):
+        s = s.replace("\\n", "").replace("\\t", "").replace("\\", "").replace("{{", "[").replace("}}", "]")
+        s = s.split("|")[1:]  # Remove first element which is 'Match'
+        count_brackets = 0
+        new_string = []
+        for part in s:
+            if count_brackets > 0:
+                new_string[-1] += "|" + part
+            else:
+                new_string.append(part)
+            count_brackets += part.count("[") - part.count("]")
+        return MatchToJsonConverter.text_to_json(new_string, match_section)
+
 
 scraper = LiquipediaScraper()
 scraper.run()
