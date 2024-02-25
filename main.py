@@ -101,6 +101,7 @@ class JSONManager:
 
         tournaments_data.to_json(self.file_path, orient="records")
         matches_data.to_json(self.file_path, orient="records")
+
         print("Fichier JSON enregistré avec succès.")
 
         
@@ -327,7 +328,6 @@ class MatchScraper:
         self.json_manager = json_manager
 
     def extract_match_section(self, match_block):
-        print("MAtchSection")
         match_block = match_block.replace("\\n", "").replace("\\t", "").replace("\\", "").replace("{{", "").replace("}}", "")
         parts = match_block.split("|")
         if len(parts) > 1:
@@ -350,6 +350,7 @@ class MatchScraper:
         for match in self.match_result:
             try:
                 match["date"] = match["date"].replace(",", "")
+                match['tournament'] = self.tournament['name']
             except:
                 pass
         return self.match_result
