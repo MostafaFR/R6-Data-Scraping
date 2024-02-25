@@ -8,16 +8,37 @@ import json
 import re
 
 
+# Définition de la classe principale pour le scraping sur Liquipedia
 class LiquipediaScraper:
     def __init__(self, base_url="https://liquipedia.net"):
+        # Initialisation des paramètres pour le scraping, comme les tournois et les années d'intérêt
+        parameters = {
+            "Tiers": [
+                "S-Tier_Tournaments",
+                "A-Tier_Tournaments",
+                "B-Tier_Tournaments",
+                # "C-Tier_Tournaments",
+            ],
+            "Years": [
+                "2024",
+                #   "2023",
+                #   "2022",
+                #   "2021"
+            ],
+        }
+        self.output_folder = "out/"
+        if not os.path.exists(self.output_folder):
+            os.makedirs(self.output_folder)
         self.base_url = base_url
         self.session = HTMLSession()
         self.excel_manager = ExcelManager()
+        self.json_manager = JSONManager()
         self.image_downloader = ImageDownloader(self.session)
-        self.team_scraper = TeamScraper(self.session, self.base_url, self.image_downloader, self.excel_manager)
-        self.tournament_scraper = TournamentScraper(self.session, self.base_url)
+        self.team_scraper = TeamScraper(self.session, self.base_url, self.image_downloader, self.excel_manager, self.json_manager)
+        self.tournament_scraper = TournamentScraper(self.session, self.base_url, self.json_manager, parameters["Tiers"], parameters["Years"])
 
     def run(self):
+        # Lance le processus de scraping pour les équipes et les tournois, puis sauvegarde les résultats dans un fichier Excel
         self.team_scraper.scrape_teams()
         self.tournament_scraper.scrape_tournaments()
         self.excel_manager.save()
@@ -55,20 +76,28 @@ class ExcelManager:
         self.workbook.save(self.file_path)
         print("Fichier Excel enregistré avec succès.")
 
+
 class JSONManager:
     def __init__(self, file_path="out/tournament.json"):
         self.file_path = file_path
         self.data = None
-        self.load_json()
+        self.load_or_create_json()
 
-    def load_json(self):
+    def load_or_create_json(self):
         if not os.path.exists(self.file_path):
-            print("Le fichier JSON n'existe pas.")
-            return
-        with open(self.file_path, "r") as f:
-            self.data = json.load(f)
+            self.data = {}
+            print("Fichier JSON créé avec succès.")
+        else:
+            with open(self.file_path, "r") as f:
+                self.data = json.load(f)
+                f.close()
+            print("Fichier JSON chargé avec succès.")
+
+    def write_json(self, data):
+        with open(self.file_path, "w") as f:
+            f.write(json.dumps(data, indent=4))
             f.close()
-        print("Fichier JSON chargé avec succès.")
+        print("Fichier JSON enregistré avec succès.")
 
     def save(self):
         with open(self.file_path, "w") as f:
@@ -96,6 +125,13 @@ class JSONManager:
                 items.extend(JSONManager.flatten_json(item, parent_key, sep=sep).items())
         return dict(items)
 
+    def convert_json_to_excel(self, json_input, sheet):
+        json_input = JSONManager.flatten_json(json_input)
+        for key, value in json_input.items():
+            sheet.append([key, value])
+        return sheet
+
+
 class ImageDownloader:
     def __init__(self, session, media_folder="media/"):
         self.media_folder = media_folder
@@ -120,11 +156,12 @@ class ImageDownloader:
 
 
 class TeamScraper:
-    def __init__(self, session, base_url, image_downloader, excel_manager):
+    def __init__(self, session, base_url, image_downloader, excel_manager, json_manager):
         self.session = session
         self.base_url = base_url
         self.image_downloader = image_downloader
         self.excel_manager = excel_manager
+        self.json_manager = json_manager
 
     def scrape_teams(self, teams_url="https://liquipedia.net/rainbowsix/Portal:Teams"):
         r = self.session.get(teams_url)
@@ -174,20 +211,17 @@ class TournamentScraper:
         self,
         session,
         base_url,
-        r6_base_url="https://liquipedia.net/rainbowsix/",
-        list_tiers=[
-            "S-Tier_Tournaments",
-            "A-Tier_Tournaments",
-            "B-Tier_Tournaments",
-            # "C-Tier_Tournaments",
-        ],
+        json_manager,
+        list_tiers=["S-Tier_Tournaments"],
+        years=["2024"],
     ):
         self.session = session
         self.base_url = base_url
-        self.r6_base_url = r6_base_url
+        self.r6_base_url = base_url + "/rainbowsix/"
         self.list_tiers = list_tiers
-        self.years = ["2023"]
+        self.years = years
         self.tournament_result = []
+        self.json_manager = json_manager
 
     def scrape_tournaments(self):
         if len(self.list_tiers) == 0 or self.list_tiers == None:
@@ -235,7 +269,7 @@ class TournamentScraper:
                 for year in self.years:
                     if year in tournament["date"]:
                         if tournament["winner"] != "":
-                            match_scraper = MatchScraper(self.session, self.base_url, tournament)
+                            match_scraper = MatchScraper(self.session, self.base_url, tournament, self.json_manager)
                             result = match_scraper.extract_matches()
                             # apprend avec le nom du tournoi seulement
                             tournament["matches"] = result
@@ -243,9 +277,8 @@ class TournamentScraper:
                             print(f"Le tournoi {tournament['name']} a été ajouté.")
                         else:
                             print(f"Le tournoi {tournament['name']} est annulé ou en cours.")
-        with open("tournament.json", "w") as f:
-            f.write(json.dumps(self.tournament_result, indent=4))
-            f.close()
+        self.json_manager.write_json(self.tournament_result)
+        # self.json_manager.convert_json_to_excel(self.tournament_result, self.json_manager.workbook.create_sheet(title="Tournaments"))
 
 
 class MatchScraper:
@@ -254,6 +287,7 @@ class MatchScraper:
         session,
         base_url,
         tournament,
+        json_manager,
         api_url="https://liquipedia.net/rainbowsix/api.php?action=query&format=json&prop=revisions&rvprop=content&titles=",
     ):
         self.session = session
@@ -265,6 +299,8 @@ class MatchScraper:
         self.pattern = r"\{\{#section:[^}]+\}\}"
         self.pattern_result = ""
         self.match_result = []
+        self.jsonconvert = MatchToJsonConverter()
+        self.json_manager = json_manager
 
     def extract_match_section(self, match_block):
         print("MAtchSection")
@@ -321,14 +357,11 @@ class MatchScraper:
             print("\n\nAucun match n'a été trouvé.")
             return
 
-
         for match in matches:
-            jsonconvert = MatchToJsonConverter()
-            json_output = jsonconvert.extract_objects(match, self.match_section)
-            json_output = jsonconvert.flatten_json(json_output)
+            json_output = self.jsonconvert.extract_objects(match, self.match_section)
+            json_output = self.json_manager.flatten_json(json_output)
             self.match_result.append(json_output)
         return self.match_result
-
 
 
 class MatchToJsonConverter:
