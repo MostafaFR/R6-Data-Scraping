@@ -78,7 +78,3 @@ https://liquipedia.net/rainbowsix/Portal:Maps
 https://liquipedia.net/rainbowsix/Help:Mediawiki
 https://liquipedia.net/rainbowsix/Help:Magic_Words
 https://liquipedia.net/rainbowsix/Special:SpecialPages 
-
-## Conclusion
-
-Ce projet fournira une base solide pour analyser les tendances et les performances dans Rainbow Six Siege à partir des données de Liquipedia, offrant ainsi des insights précieux aux fans, analystes et participants des tournois.
